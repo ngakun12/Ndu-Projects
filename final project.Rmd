@@ -1,0 +1,102 @@
+---
+title: "time series final project"
+author: "Ndungu Gakunga"
+date: "2024-05-06"
+output: html_document
+---
+
+
+```{r}
+# Load necessary libraries
+library(readr)
+library(dplyr)
+library(forecast)
+library(tibbletime)
+```
+```{r}
+# Assume you have a column 'date' for the time index and 'readmissions' as your target variable
+hospital <- hospital %>%
+  mutate(date = as.Date(date, format = "%Y-%m-%d")) %>%
+  arrange(date) %>%
+  as_tbl_time(index = date)
+
+# Convert to a ts object, specifying the appropriate frequency
+# For example, if your data is monthly:
+hospital_ts <- as.ts(hospital_data$readmissions, frequency = 12)
+```
+```{r}
+
+```
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(tibbletime)  # If you're using time-aware tibbles
+library(forecast)    # For time series analysis
+
+# Correctly format the date columns
+hospital <- hospital %>%
+  mutate(Date.of.Admission = as.Date(Date.of.Admission, format = "%Y-%m-%d"),
+         Discharge.Date = as.Date(Discharge.Date, format = "%Y-%m-%d"))
+
+# Optionally convert to a tbl_time object if you're using time-aware analysis
+hospital <- as_tbl_time(hospital, index = Date.of.Admission)
+
+# Now, you can proceed with further analysis, such as summarizing, plotting, or time series forecasting.
+
+# For example, here's a quick look at how you might plot the number of admissions over time:
+library(ggplot2)
+
+ggplot(hospital, aes(x = Date.of.Admission)) +
+  geom_histogram(stat = "count", bins = 30) +
+  labs(title = "Number of Admissions Over Time",
+       x = "Date of Admission",
+       y = "Count of Admissions")
+
+# Ensure the 'forecast' library is loaded and you proceed with time series analysis as intended.
+
+```
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(forecast)
+library(lubridate)
+library(tseries)
+
+
+# Assuming the dataset is named 'hospital'
+# Ensure Date.of.Admission is a Date type
+hospital$Date.of.Admission <- as.Date(hospital$Date.of.Admission)
+
+# Aggregate data by Date.of.Admission to get daily admissions count
+admissions_daily <- hospital %>%
+  group_by(Date.of.Admission) %>%
+  summarise(Count = n())
+
+# Convert to time series object, assuming daily data that needs to be analyzed monthly
+admissions_ts <- ts(admissions_daily$Count, frequency = 12, start = c(year(min(hospital$Date.of.Admission)), month(min(hospital$Date.of.Admission))))
+
+# Plot the time series
+plot(admissions_ts, main = "Monthly Admissions Count", xlab = "Time", ylab = "Count")
+
+# Decompose the time series to observe components
+decomposed_ts <- decompose(admissions_ts)
+plot(decomposed_ts)
+
+# Check for stationarity
+adf.test(admissions_ts, alternative = "stationary")
+
+# Fit a time series model, like ARIMA
+fit <- auto.arima(admissions_ts)
+summary(fit)
+
+# Forecast future values
+future_values <- forecast(fit, h = 12)  # forecast next year (12 months)
+plot(future_values)
+
+```
+```{r}
+head(hospital)
+```
+
