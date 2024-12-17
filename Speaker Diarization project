@@ -1,0 +1,132 @@
+import csv
+import torch
+from transformers import AutoTokenizer, pipeline
+from huggingface_hub import login# Login to Hugging Face
+key = "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"  # Replace with your Hugging Face token
+login(token=key)# Load the Llama-2 model and tokenizer
+model_name = "meta-llama/Llama-2-7b-chat-hf"
+tokenizer = AutoTokenizer.from_pretrained(model_name, token=key)
+text_gen_pipeline = pipeline(
+    "text-generation",
+    model=model_name,
+    tokenizer=tokenizer,
+    torch_dtype=torch.float16,
+    device_map="auto",
+)# Load the dataset
+file_path = "/home/ndu/dialogueText.csv"def load_conversations(file_path):
+    """
+    Load all conversations from the CSV file and organize them by dialogue ID.    Args:
+        file_path (str): The path to the CSV file containing conversation data.    Returns:
+        list: A list of conversations, each a list of rows.
+    """
+    conversations = []
+    current_dialogue_id = None
+    current_conversation = []    with open(file_path, newline='', encoding='utf-8') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            dialogue_id = row['dialogueID']
+            if dialogue_id != current_dialogue_id:
+                if current_conversation:
+                    conversations.append(current_conversation)
+                current_dialogue_id = dialogue_id
+                current_conversation = []
+            current_conversation.append(row)
+        if current_conversation:
+            conversations.append(current_conversation)
+    return conversations# Load all conversations from the CSV file
+conversations = load_conversations(file_path)def calculate_ground_truth_speakers(conversations):
+    """
+    Calculate the number of unique speakers for each conversation based on identifiers.    Args:
+        conversations (list): A list of conversations organized by dialogue ID.    Returns:
+        dict: A dictionary where keys are dialogue IDs and values are the count of unique speakers.
+    """
+    ground_truth_speakers = {}
+    for conversation in conversations:
+        dialogue_id = conversation[0]['dialogueID']
+        # Extract unique speaker identifiers from the 'from' field
+        unique_speakers = set(row['from'] for row in conversation if row['from'])
+        ground_truth_speakers[dialogue_id] = len(unique_speakers)
+    return ground_truth_speakers# Calculate the ground truth number of speakers for each conversation
+ground_truth_speakers = calculate_ground_truth_speakers(conversations)# Function to generate prompts for Llama-2
+def generate_prompts(conversations):
+    """
+    Generate prompts for each conversation for the Llama-2 model.    Args:
+        conversations (list): A list of conversations.    Returns:
+        list: A list of prompts.
+    """
+    prompts = []
+    for conversation in conversations:
+        dialogue = "\n".join([f"{row['from']}: {row['text']}" for row in conversation])
+        prompt = (
+            f"Analyze the following conversation to determine the number of different speakers involved. "
+            f"Use their identifiers to distinguish between them.\n\n"
+            f"Conversation:\n{dialogue}\n\n"
+            "Steps:\n"
+            "- Distinguish the various utterances in the dialogue of the conversation.\n"
+            "- Identify each speaker by their unique identifier.\n"
+            "- Count the number of distinct identifiers present.\n"
+            "- Clearly state the total number of different speakers in the conversation using the format: The conversation includes X different speakers.\n\n"
+            "Answer:"
+        )
+        prompts.append(prompt)
+    return prompts# Generate prompts from the conversations
+prompts = generate_prompts(conversations)# Function to get responses from the model
+def get_responses(prompts):
+    """
+    Get responses from the Llama-2 model for each prompt.    Args:
+        prompts (list): A list of prompts.    Returns:
+        list: A list of model responses.
+    """
+    responses = []
+    for prompt in prompts:
+        sequences = text_gen_pipeline(
+            prompt,
+            do_sample=True,
+            temperature=0.7,
+            max_new_tokens=100,  # Use max_new_tokens to control generation length
+            num_return_sequences=1,
+        )
+        response_text = sequences[0]['generated_text']
+        responses.append(response_text)
+    return responses# Get responses from the model
+responses = get_responses(prompts)# Function to extract the number of speakers from the model's response
+def extract_num_speakers(response):
+    """
+    Extract the predicted number of speakers from the model's response.    Args:
+        response (str): The model's response text.    Returns:
+        int or None: The predicted number of speakers, or None if not found.
+    """
+    try:
+        # Search for the phrase "The conversation includes" and extract the number that follows
+        start_index = response.find("The conversation includes")
+        if start_index != -1:
+            rest_of_response = response[start_index:]
+            # Look for a number following the word "includes"
+            words = rest_of_response.split()
+            for idx, word in enumerate(words):
+                if word.isdigit():
+                    return int(word)
+    except (ValueError, IndexError):
+        return None  # Return None if no integer is found
+    return None# Extract the number of speakers from the model's responses
+predicted_speakers = {conv[0]['dialogueID']: extract_num_speakers(response) for conv, response in zip(conversations, responses)}# Print the results
+print("Ground Truth vs Predicted Number of Speakers:")
+for dialogue_id in sorted(ground_truth_speakers.keys()):
+    gt = ground_truth_speakers[dialogue_id]
+    predicted = predicted_speakers.get(dialogue_id, "Not predicted")
+    print(f"Dialogue ID: {dialogue_id}, Ground Truth: {gt}, Predicted: {predicted}")# Calculate accuracy
+def calculate_accuracy(predicted_speakers, ground_truth_speakers):
+    """
+    Calculate the accuracy of the predicted number of speakers compared to the ground truth.    Args:
+        predicted_speakers (dict): A dictionary where keys are dialogue IDs and values are predicted speaker counts.
+        ground_truth_speakers (dict): A dictionary where keys are dialogue IDs and values are true speaker counts.    Returns:
+        float: The accuracy as a percentage of correctly predicted conversations.
+    """
+    correct_predictions = 0
+    total_predictions = 0    for dialogue_id, predicted in predicted_speakers.items():
+        ground_truth = ground_truth_speakers.get(dialogue_id, 0)
+        if predicted == ground_truth:
+            correct_predictions += 1
+        total_predictions += 1    accuracy = (correct_predictions / total_predictions) if total_predictions else 0
+    return accuracyaccuracy = calculate_accuracy(predicted_speakers, ground_truth_speakers)
+print(f"\nAccuracy: {accuracy * 100:.2f}%")
